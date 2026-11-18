@@ -132,3 +132,44 @@ app.get("/users", (req, res) => req.id ?? 0);
         ("choose", 7),
         ("GET /users", 2),
     ]
+
+
+def test_vue_extracts_both_inline_scripts_at_original_source_positions():
+    source = (
+        "<template><p>caf\u00e9</p></template>\r\n"
+        "<script>function fallback(value) { return value ?? 0; }</script>\r\n"
+        "<script setup\n"
+        "  lang='ts'>\n"
+        "const choose = (v: number) => {\n"
+        "  return v > 0 ? v : 0;\n"
+        "};\n"
+        "</script>"
+    )
+    path = "src/demo/Panel.vue"
+    functions = functions_in_source(source, path)
+
+    assert [(fn.name, fn.complexity, fn.start_line, fn.end_line) for fn in functions] == [
+        ("fallback", 2, 2, 2),
+        ("choose", 2, 5, 7),
+    ]
+    assert {(fn.path, fn.namespace, fn.language) for fn in functions} == {
+        (path, "demo.Panel", "typescript")
+    }
+    data = source.encode("utf-8")
+    assert [data[fn.start_byte : fn.end_byte] for fn in functions] == [
+        b"function fallback(value) { return value ?? 0; }",
+        b"choose = (v: number) => {\n  return v > 0 ? v : 0;\n}",
+    ]
+
+
+def test_vue_ignores_scripts_outside_supported_inline_blocks():
+    source = """
+<!-- <script>function commented() {}</script> -->
+<template><div><script>function nested() {}</script></div></template>
+<docs><script>function custom() {}</script></docs>
+<style>/* <script>function styled() {}</script> */</style>
+<script src="./external.ts" lang=ts>function external() {}</script>
+<script lang=coffee>function unsupported() {}</script>
+<script setup lang=js>function visible() {}</script>
+"""
+    assert [fn.name for fn in functions_in_source(source, "Panel.vue")] == ["visible"]

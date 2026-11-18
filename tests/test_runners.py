@@ -98,6 +98,17 @@ def test_typescript_package_is_found_from_a_source_file(tmp_path):
     assert typescript_packages(tmp_path, [source]) == [(tmp_path / "web").resolve()]
 
 
+def test_vitest_includes_vue_in_a_vue_only_package(tmp_path):
+    _write(tmp_path, "web/package.json", json.dumps({"scripts": {"test": "vitest run"}}))
+    source = _write(tmp_path, "web/src/Panel.vue", "<script setup>const n = 1</script>\n")
+    package = tmp_path / "web"
+
+    assert typescript_packages(tmp_path, [source]) == [package.resolve()]
+    command = typescript_command(package, [source], tmp_path / "coverage")
+    assert command is not None
+    assert "--coverage.include=src/Panel.vue" in command
+
+
 def test_rust_module_is_the_nearest_cargo_package(tmp_path):
     _write(tmp_path, "src-tauri/Cargo.toml", '[package]\nname = "bookwriter"\nversion = "0.1.0"\n')
     lib = _write(tmp_path, "src-tauri/src/lib.rs", "pub fn read_text() {}\n")

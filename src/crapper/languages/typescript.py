@@ -1,4 +1,4 @@
-"""TypeScript, TSX, and JavaScript functions, methods, and complexity.
+"""TypeScript, TSX, JavaScript, and Vue script functions and complexity.
 
 Decision points follow the same structural rule as crap4java: `if`, loops,
 `catch`, `?:`, each `switch` case (including `default`), `&&` / `||`, and the
@@ -10,6 +10,8 @@ function. A class method's namespace is `module.Class`, which is the
 uml-viewer class key. `.js`, `.mjs`, `.cjs`, and `.jsx` use the JavaScript
 grammar and these same rules.
 """
+
+from dataclasses import replace
 
 from crapper.languages.treesitter import (
     binary_logic,
@@ -58,6 +60,12 @@ _ROUTE_METHODS = {
 }
 _CALLBACKS = {"arrow_function", "function_expression"}
 _JS_SUFFIXES = (".jsx", ".mjs", ".cjs", ".js")
+_VUE_SCRIPT_GRAMMARS = {
+    "js": "javascript",
+    "jsx": "javascript",
+    "ts": "typescript",
+    "tsx": "tsx",
+}
 
 
 def _is_decision(node) -> bool:
@@ -103,7 +111,7 @@ def _strip_src_dir(relative: str) -> str:
 
 
 def _strip_script_suffix(relative: str) -> str:
-    for suffix in (".tsx", ".mts", ".cts", ".jsx", ".mjs", ".cjs", ".ts", ".js"):
+    for suffix in (".tsx", ".mts", ".cts", ".jsx", ".mjs", ".cjs", ".ts", ".js", ".vue"):
         if relative.endswith(suffix):
             return relative[: -len(suffix)]
     return relative
@@ -362,8 +370,7 @@ def _collect_routes(routes: list, data: bytes, call) -> None:
         routes.append((callback.start_byte, callback, method, route))
 
 
-def _append_routes(found, routes, data, module, path) -> None:
-    used: set[str] = set()
+def _append_routes(found, routes, data, module, path, used: set[str]) -> None:
     for _start, callback, method, route in sorted(routes, key=lambda item: item[0]):
         _append(
             found,
@@ -378,11 +385,10 @@ def _append_routes(found, routes, data, module, path) -> None:
         )
 
 
-def functions_in_source(
-    source: str, path: str, source_root: str | None = None
+def _script_functions(
+    source: str, grammar: str, module: str, path: str, used_routes: set[str]
 ) -> list[Function]:
-    data, tree = parse(source, _grammar(path))
-    module = _module_namespace(path, source_root)
+    data, tree = parse(source, grammar)
     found: list[tuple[int, Function]] = []
     routes: list[tuple[int, object, str, str | None]] = []
     for node in descendants(tree.root_node):
@@ -394,6 +400,63 @@ def functions_in_source(
             _append_arrows(found, data, node, module, path)
         elif node.type == "call_expression":
             _collect_routes(routes, data, node)
-    _append_routes(found, routes, data, module, path)
+    _append_routes(found, routes, data, module, path, used_routes)
     found.sort(key=lambda item: item[0])
     return [function for _, function in found]
+
+
+def _vue_script_grammar(data: bytes, tag) -> str | None:
+    lang = "js"
+    for attribute in tag.named_children:
+        if attribute.type != "attribute":
+            continue
+        name = child_of_type(attribute, "attribute_name")
+        if name is None:
+            continue
+        key = node_text(data, name).lower()
+        if key == "src":
+            return None
+        if key == "lang":
+            value = child_of_type(attribute, "attribute_value", "quoted_attribute_value")
+            if value is not None and value.type == "quoted_attribute_value":
+                value = child_of_type(value, "attribute_value")
+            lang = node_text(data, value).lower() if value is not None else ""
+    return _VUE_SCRIPT_GRAMMARS.get(lang)
+
+
+def _vue_functions(source: str, module: str, path: str) -> list[Function]:
+    data, tree = parse(source, "html")
+    found: list[Function] = []
+    used_routes: set[str] = set()
+    for block in tree.root_node.named_children:
+        if block.type != "script_element":
+            continue
+        tag = child_of_type(block, "start_tag")
+        body = child_of_type(block, "raw_text")
+        if tag is None or body is None or child_of_type(block, "end_tag") is None:
+            continue
+        grammar = _vue_script_grammar(data, tag)
+        if grammar is None:
+            continue
+        row_offset = body.start_point[0]
+        byte_offset = body.start_byte
+        for fn in _script_functions(node_text(data, body), grammar, module, path, used_routes):
+            found.append(
+                replace(
+                    fn,
+                    start_line=fn.start_line + row_offset,
+                    end_line=fn.end_line + row_offset,
+                    start_byte=fn.start_byte + byte_offset,
+                    end_byte=fn.end_byte + byte_offset,
+                )
+            )
+    return found
+
+
+def functions_in_source(
+    source: str, path: str, source_root: str | None = None
+) -> list[Function]:
+    module = _module_namespace(path, source_root)
+    if path.endswith(".vue"):
+        return _vue_functions(source, module, path)
+    return _script_functions(source, _grammar(path), module, path, set())

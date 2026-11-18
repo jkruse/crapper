@@ -18,6 +18,7 @@ EXTENSIONS = {
     ".jsx": "typescript",
     ".mjs": "typescript",
     ".cjs": "typescript",
+    ".vue": "typescript",
     ".rs": "rust",
     ".py": "python",
 }
