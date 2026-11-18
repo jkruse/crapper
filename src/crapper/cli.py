@@ -44,7 +44,10 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py).
+Vue (.vue), Rust (.rs), Python (.py).
+
+Vue scores inline JavaScript and TypeScript in <script> and <script setup>.
+Templates, styles, and external scripts are not scored.
 
 Options:
   -h, --help                    Print this help and exit.
@@ -73,7 +76,8 @@ Coverage, when it is produced:
   Clojure      clj -M:cov --lcov, then Cloverage form counts or LCOV
   Java         Maven JaCoCo instruction coverage, for each pom.xml module
   Go           go test ./... -coverprofile=...
-  TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
+  TypeScript / Vue: npm run coverage, Vitest's own LCOV, or c8 around npm test
+                    Vue LCOV must reference the original .vue files and lines.
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
 
@@ -81,7 +85,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name
   Java         package.Class, and the method name
   Go           import path, or import.path.Receiver for methods
-  TypeScript   dotted module path, or module.Class for methods
+  TypeScript / Vue: dotted module path, or module.Class for methods
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
 """
