@@ -138,6 +138,35 @@ def test_existing_coverage_feeds_the_snapshot(tmp_path):
     assert ":crap 2.0" in text
 
 
+def test_vue_discovery_and_lcov_scoring(tmp_path):
+    _write(
+        tmp_path,
+        "src/ui/Panel.vue",
+        "<template><div /></template>\n"
+        "<script setup lang=\"ts\">\n"
+        "function choose(value: number) {\n"
+        "  return value > 0 ? value : 0;\n"
+        "}\n"
+        "</script>\n",
+    )
+    _write(
+        tmp_path,
+        "coverage/lcov.info",
+        "SF:src/ui/Panel.vue\n"
+        "DA:3,1\nDA:4,1\n"
+        "BRDA:4,0,0,1\nBRDA:4,0,1,0\n"
+        "end_of_record\n",
+    )
+
+    assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
+    snapshot = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':namespace "ui.Panel"' in snapshot
+    assert ':name "choose"' in snapshot
+    assert ":complexity 2" in snapshot
+    assert ":coverage 50.0" in snapshot
+    assert ":crap 2.5" in snapshot
+
+
 def test_threshold_exits_when_the_worst_score_is_too_high(tmp_path):
     _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n")
     lcov = tmp_path / "target" / "coverage" / "lcov.info"
