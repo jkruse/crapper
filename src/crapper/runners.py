@@ -302,6 +302,7 @@ def _vitest_coverage_command(
             "--coverage.reporter=lcov",
             f"--coverage.reportsDirectory={report_dir}",
             "--coverage.reportOnFailure=true",
+            "--coverage.thresholds=false",
         ]
     )
     for include in _vitest_includes(package, files):
@@ -527,7 +528,11 @@ def _cover_typescript(root: Path, files: list[Path]) -> None:
         _prepare_report(report)
         code = run_shell(command, package)
         if code != 0:
-            _warn(f"TypeScript coverage exited {code} in {package}. TypeScript coverage will score 0%.")
+            _warn(
+                f"TypeScript coverage exited {code} in {package}. "
+                "Any generated LCOV reports will still be read; "
+                "files without coverage data will score 0%."
+            )
 
 
 def _needs_vitest_provider(command: list[str]) -> bool:
