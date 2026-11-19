@@ -63,6 +63,7 @@ def test_vitest_uses_its_own_coverage_instead_of_c8(tmp_path):
     assert "--coverage.reporter=lcov" in text
     assert f"--coverage.reportsDirectory={report_dir}" in text
     assert "--coverage.include=src/book.ts" in text
+    assert "--coverage.thresholds=false" in command
     assert "book.test.ts" not in text
 
 
@@ -98,11 +99,46 @@ def test_vite_plus_uses_native_lcov(tmp_path, monkeypatch, manifest):
                 "--coverage.reporter=lcov",
                 f"--coverage.reportsDirectory={report_dir}",
                 "--coverage.reportOnFailure=true",
+                "--coverage.thresholds=false",
                 "--coverage.include=src/book.ts",
             ],
             tmp_path,
         )
     ]
+
+
+@pytest.mark.parametrize("runner", ["vitest run", "vp test"])
+@pytest.mark.parametrize("writes_report", [True, False])
+def test_failed_typescript_run_keeps_generated_coverage(
+    tmp_path, monkeypatch, capsys, runner, writes_report
+):
+    from crapper.cli import _coverage_bundle, parse_args
+    from crapper.model import Function
+
+    _write(tmp_path, "package.json", json.dumps({"scripts": {"test": runner}}))
+    source = _write(tmp_path, "src/book.ts", "export function book() {\n  return 1;\n}\n")
+    (tmp_path / "node_modules" / "@vitest" / "coverage-v8").mkdir(parents=True)
+
+    def failed_run(command, cwd):
+        if writes_report:
+            _write(
+                tmp_path,
+                "target/coverage/typescript/lcov.info",
+                "SF:src/book.ts\nDA:1,1\nDA:2,0\nend_of_record\n",
+            )
+        return 1
+
+    monkeypatch.setattr("crapper.runners.run_shell", failed_run)
+    monkeypatch.setattr("crapper.cli.run_coverage", run_coverage)
+    bundle = _coverage_bundle(parse_args([]), tmp_path, [source])
+    function = Function(
+        name="book", namespace="book", complexity=1, start_line=1, end_line=3,
+        path="src/book.ts", language="typescript",
+    )
+    assert bundle.percent_for(function) == (50.0 if writes_report else None)
+    warning = capsys.readouterr().err
+    assert "TypeScript coverage exited 1" in warning
+    assert "Any generated LCOV reports will still be read" in warning
 
 
 def test_explicit_vitest_takes_precedence_over_vite_plus_dependency(tmp_path):
