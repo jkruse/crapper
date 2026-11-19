@@ -148,6 +148,20 @@ def _uses_vitest(package: Path, scripts: dict) -> bool:
     return any((package / name).is_file() for name in _VITEST_CONFIGS)
 
 
+def _explicit_test_runner(scripts: dict) -> str | None:
+    variants = (name for name in scripts if name.startswith(("test:", "test-", "test_")))
+    for name in ("test", *variants):
+        script = scripts.get(name)
+        if not isinstance(script, str):
+            continue
+        words = script.split(maxsplit=2)
+        if words[:2] == ["vp", "test"]:
+            return "vp"
+        if words[:1] == ["vitest"]:
+            return "vitest"
+    return None
+
+
 def _vitest_version(package: Path) -> str | None:
     installed = package / "node_modules" / "vitest" / "package.json"
     if installed.is_file():
@@ -228,7 +242,13 @@ def typescript_command(
         scripts = {}
     if "coverage" in scripts:
         return ["npm", "run", "coverage"]
-    if _uses_vitest(package, scripts):
+    runner = _explicit_test_runner(scripts)
+    dev_dependencies = data.get("devDependencies")
+    if runner == "vp" or (
+        runner is None and isinstance(dev_dependencies, dict) and "vite-plus" in dev_dependencies
+    ):
+        return _vitest_coverage_command(package, files, report_dir, vite_plus=True)
+    if runner == "vitest" or _uses_vitest(package, scripts):
         return _vitest_coverage_command(package, files, report_dir)
     if "test" not in scripts:
         return None
@@ -258,12 +278,23 @@ def _vitest_includes(package: Path, files: list[Path]) -> list[str]:
     return includes
 
 
-def _vitest_coverage_command(package: Path, files: list[Path], report_dir: Path) -> list[str]:
-    binary = package / "node_modules" / ".bin" / "vitest"
-    if binary.is_file():
-        command = [str(binary)]
+def _vitest_coverage_command(
+    package: Path, files: list[Path], report_dir: Path, *, vite_plus: bool = False
+) -> list[str]:
+    modules = package / "node_modules"
+    bin_dir = modules / ".bin"
+    if vite_plus:
+        if sys.platform == "win32":
+            # Use the package entry point rather than running its batch shim.
+            entry = modules / "vite-plus" / "bin" / "vp"
+            command = ["node", str(entry)] if entry.is_file() else ["vp"]
+        else:
+            binary = bin_dir / "vp"
+            command = [str(binary)] if binary.is_file() else ["vp"]
+        command.append("test")
     else:
-        command = ["npx", "vitest"]
+        binary = bin_dir / "vitest"
+        command = [str(binary)] if binary.is_file() else ["npx", "vitest"]
     command.extend(
         [
             "run",
@@ -500,9 +531,8 @@ def _cover_typescript(root: Path, files: list[Path]) -> None:
 
 
 def _needs_vitest_provider(command: list[str]) -> bool:
-    if command[:3] == ["npm", "run", "coverage"]:
-        return False
-    return any(Path(part).name == "vitest" for part in command)
+    # Vite+ resolves a bundled runner, which may require a different provider version.
+    return command[:2] == ["npx", "vitest"] or Path(command[0]).name == "vitest"
 
 
 def _python_kind(py: str, package: Path) -> str:
