@@ -66,18 +66,69 @@ def test_vitest_uses_its_own_coverage_instead_of_c8(tmp_path):
     assert "book.test.ts" not in text
 
 
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        {"scripts": {"test": "vp test"}},
+        {"scripts": {"test:unit": "  vp   test run"}},
+        {"devDependencies": {"vite-plus": "1.7.0"}},
+    ],
+)
+def test_vite_plus_uses_native_lcov(tmp_path, monkeypatch, manifest):
+    _write(tmp_path, "package.json", json.dumps(manifest))
+    source = _write(tmp_path, "src/book.ts", "export const book = 1\n")
+    test = _write(tmp_path, "src/book.test.ts", "// test\n")
+    report_dir = tmp_path / "target" / "coverage" / "typescript"
+    calls = []
+
+    def fake_run(command, cwd):
+        calls.append((command, cwd))
+        return 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", fake_run)
+    run_coverage(tmp_path, [source, test], None)
+
+    assert calls == [
+        (
+            [
+                "vp",
+                "test",
+                "run",
+                "--coverage",
+                "--coverage.reporter=lcov",
+                f"--coverage.reportsDirectory={report_dir}",
+                "--coverage.reportOnFailure=true",
+                "--coverage.include=src/book.ts",
+            ],
+            tmp_path,
+        )
+    ]
+
+
+def test_explicit_vitest_takes_precedence_over_vite_plus_dependency(tmp_path):
+    _write(
+        tmp_path,
+        "package.json",
+        json.dumps({"scripts": {"test": "vitest run"}, "devDependencies": {"vite-plus": "1.7.0"}}),
+    )
+    command = typescript_command(tmp_path, [], tmp_path / "coverage")
+    assert command is not None
+    assert command[:4] == ["npx", "vitest", "run", "--coverage"]
+
+
 def test_existing_coverage_script_is_left_alone(tmp_path):
     _write(
         tmp_path,
         "package.json",
-        json.dumps({"scripts": {"coverage": "vitest run --coverage", "test": "vitest run"}}),
+        json.dumps({"scripts": {"coverage": "vp test run --coverage", "test": "vp test"}}),
     )
     command = typescript_command(tmp_path, [], tmp_path / "coverage")
     assert command == ["npm", "run", "coverage"]
 
 
-def test_node_test_script_still_uses_c8(tmp_path):
-    _write(tmp_path, "package.json", json.dumps({"scripts": {"test": "node --test"}}))
+@pytest.mark.parametrize("test", ["node --test", "echo vp test", "vp tester"])
+def test_non_vitest_test_script_still_uses_c8(tmp_path, test):
+    _write(tmp_path, "package.json", json.dumps({"scripts": {"test": test}}))
     report_dir = tmp_path / "target" / "coverage" / "typescript"
     command = typescript_command(tmp_path, [], report_dir)
     assert command == [
